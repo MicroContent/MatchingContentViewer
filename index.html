@@ -1,0 +1,358 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <title>MatchingContentViewer</title>
+    <script type="application/javascript">
+        function init() {
+            window.data = getData();
+            setXapiObjectGetter(getXapiObject);
+            registerOnSubmitListener(onSubmit);
+        }
+        function updateLayout() {
+            propagateLayoutChanges();
+        }
+        function sendStatement(stmt) {
+            sendXapiStatement(stmt);
+        }
+    </script>
+    <style type="text/css">
+        .category {
+            margin-bottom: 10px;
+        }
+
+        .item {
+            display: inline-block;
+            margin: 10px;
+            padding: 5px 14px;
+            background-color: #fff;
+            border: 1px solid #ddd;
+            border-radius: 15px;
+            cursor: pointer;
+            text-decoration: none;
+        }
+
+        .item.active:hover {
+            background-color: #eee;
+        }
+
+        .item.not-active:hover {
+            cursor: default;
+        }
+
+        .focused-item {
+            /*background-color: #eee;
+            border: 1px solid #aaa;*/
+            color: white;
+            background-color: #3f51b5;
+        }
+
+        .focused-item.active:hover {
+            /*background-color: #eee;
+            border: 1px solid #aaa;*/
+            color: white;
+            background-color: #3f51b5;
+            border: 2px solid #ddd;
+            margin: 9px;
+        }
+
+        .matched-item {}
+
+        .matched-true {
+            color: white;
+            background-color: green;
+        }
+
+        .matched-false {
+            color: white;
+            background-color: red;
+            text-decoration: line-through;
+        }
+
+        .missing-item {
+            color: red;
+            margin: 10px;
+        }
+
+        .not-active {
+            pointer-events: none;
+        }
+
+        hr {
+            display: block;
+            margin-top: 0.5em;
+            margin-bottom: 0.5em;
+            margin-left: auto;
+            margin-right: auto;
+            border-style: inset;
+            border-width: 1px;
+        }
+    </style>
+</head>
+
+<body>
+    <h1 id="title"></h1>
+    <div id="categoryContainer"></div>
+
+    <div id="itemContainer">
+        <hr>
+    </div>
+
+    <script type="application/javascript">
+        var isShowingSolution = false;
+        var globalItemButtons = [];
+        var categoryElements = [];
+        var selectedItem;
+
+        function getCategoryClickFunction(category, items) {
+            var categoryClickFunc = function () {
+                if (selectedItem !== undefined) {
+                    var index = -1;
+                    categoryElements.some((function (c, i) {
+                        if (c.name === category.name) {
+                            index = i;
+                            return true;
+                        }
+                    }));
+                    var currentCategory = categoryElements[index];
+
+                    if (currentCategory !== undefined) {
+                        var isAlreadyMatched = currentCategory.matchedItems.some(function (item) { return item === selectedItem.innerHTML });
+                        if (!isAlreadyMatched) {
+                            var item = document.createElement("a");
+                            item.setAttribute("class", "item active");
+                            item.innerHTML = selectedItem.innerHTML;
+                            item.onclick = function () {
+                                items.removeChild(item);
+                                var index = currentCategory.matchedItems.indexOf(item.innerHTML);
+
+                                if (index > -1) {
+                                    currentCategory.matchedItems.splice(index, 1);
+                                }
+                                sendStatement(buildStatement("interacted"));
+                            }
+                            items.appendChild(item);
+                            currentCategory.matchedItems.push(item.innerHTML);
+                            updateLayout();
+                            sendStatement(buildStatement("interacted"));
+                        }
+                    }
+                }
+            }
+            return categoryClickFunc;
+        }
+
+        function setCategories() {
+            var categoryContainer = document.getElementById("categoryContainer");
+
+            data.categories.forEach(function (category) {
+                var wrapper = document.createElement("div");
+                wrapper.setAttribute("class", "category");
+                var cat = document.createElement("label");
+                var items = document.createElement("div");
+                cat.innerHTML = category.name;
+
+                var labelWrapper = document.createElement("div");
+                labelWrapper.appendChild(cat);
+
+                wrapper.appendChild(labelWrapper);
+                wrapper.appendChild(items);
+                categoryContainer.appendChild(wrapper);
+                categoryElements.push({id: category.id, name: category.name, matchedItems: [] })
+                cat.onclick = getCategoryClickFunction(category, items);
+            });
+        }
+
+        function setGlobalItems() {
+            var itemContainer = document.getElementById("itemContainer");
+
+            window.data.globalItems.forEach(function (item) {
+                var button = document.createElement("a");
+                button.setAttribute("class", "item active");
+                button.innerHTML = item;
+                button.onclick = function () {
+                    selectedItem = button;
+                    globalItemButtons.forEach(function (button) {
+                        button.classList.remove("focused-item");
+                    });
+                    button.classList.add("focused-item");
+                }
+                itemContainer.appendChild(button);
+                globalItemButtons.push(button);
+            });
+        }
+
+        function onSubmit() {
+            var categories = document.getElementsByClassName("category");
+            var itemContainer = document.getElementById("itemContainer");
+
+            if (!isShowingSolution) {
+                var isCorrect = new Array(categoryElements.length);
+                var missingItems = new Array(categoryElements.length);
+                for (var i = 0; i < categoryElements.length; i++) {
+                    isCorrect[i] = categoryElements[i].matchedItems.map(function (e) {
+                        return data.categories[i].items.some(function (item) { return e === item });
+                    });
+                    missingItems[i] = data.categories[i].items.filter(function (e) {
+                        return !categoryElements[i].matchedItems.some(function (item) { return e === item });
+                    });
+                }
+
+                for (var i = 0; i < categories.length; i++) {
+                    var items = categories[i].getElementsByClassName("item");
+                    for (var j = 0; j < items.length; j++) {
+                        if (isCorrect[i][j]) {
+                            items[j].classList.add("matched-true");
+                        } else {
+                            items[j].classList.add("matched-false");
+                        }
+                        items[j].classList.remove("active");
+                        items[j].classList.add("not-active");
+                    }
+
+                    missingItems[i].forEach(function (item) {
+                        var missingItem = document.createElement("label");
+                        missingItem.innerHTML = item;
+                        missingItem.setAttribute("class", "missing-item");
+                        categories[i].firstChild.nextSibling.appendChild(missingItem);
+                    });
+                }
+
+                itemContainer.setAttribute("style", "display: none;");
+                updateLayout();
+                isShowingSolution = true;
+                sendStatement(buildStatement("answered"))
+            } else {
+                for (var i = 0; i < categories.length; i++) {
+                    var items = categories[i].getElementsByClassName("item");
+                    for (var j = 0; j < items.length; j++) {
+                        items[j].classList.remove("matched-true");
+                        items[j].classList.remove("matched-false");
+                        items[j].classList.remove("not-active");
+                        items[j].classList.add("active");
+                    }
+                    var missingItems = document.getElementsByClassName("missing-item");
+                    while (missingItems.length > 0) {
+                        missingItems[0].parentNode.removeChild(missingItems[0]);
+                    }
+                }
+
+                itemContainer.removeAttribute("style");
+                updateLayout();
+                isShowingSolution = false;
+            }
+        }
+
+        function buildStatement(verb) {
+            return {
+                object: getXapiObject(),
+                verb: getXapiVerb(verb),
+                result: getXapiResult()
+            }
+        }
+
+        function getXapiObject() {
+            return {
+                "objectType": "Activity",
+                //id is set by hosting application
+                "id": undefined,
+                "definition": {
+                    "description": {
+                        "de-AT": window.data.title
+                    },
+                    "type": "http://adlnet.gov/expapi/activities/cmi.interaction",
+                    "interactionType": "matching",
+                    "correctResponsesPattern": getCorrectResponsePattern(),
+                    "source": getSourceSet(),
+                    "target": getTargetSet()
+                }
+            }
+        }
+
+        function getXapiVerb(verb) {
+            switch (verb) {
+                case "interacted":
+                    return {
+                        "id": "http://adlnet.gov/expapi/verbs/interacted",
+                        "display": {
+                            "de-DE": "interagierte",
+                            "en-US": "interacted",
+                            "fr-FR": "a interagi",
+                            "es-ES": "interactuó"
+                        }
+                    };
+                case "answered":
+                    return {
+                        "id": "http://adlnet.gov/expapi/verbs/answered",
+                        "display": {
+                            "de-DE": "beantwortete",
+                            "en-US": "answered",
+                            "fr-FR": "a répondu",
+                            "es-ES": "contestó"
+                        }
+                    };
+            }
+            return undefined;
+        }
+
+        function getXapiResult() {
+            return {
+                response: getCurrentResponsePattern()
+            }
+        }
+
+        function getCorrectResponsePattern() {
+            return [window.data.categories.filter(function (cat) {
+                //only categories with items will be considered
+                return cat.items !== undefined && cat.items.length > 0;
+            }).map(function (cat) {
+                return cat.items.map(function (item) {
+                    return cat.id + "[.]" + item;
+                }).join("[,]")
+            }).join("[,]")];
+        }
+
+        function getCurrentResponsePattern() {
+            return categoryElements.filter(function (cat) {
+                return cat.matchedItems !== undefined && cat.matchedItems.length > 0;
+            }).map(function (cat) {
+                return cat.matchedItems.map(function (item) {
+                    return cat.id + "[.]" + item;
+                }).join("[,]")
+            }).join("[,]");
+        }
+
+        function getSourceSet() {
+            //categeory set
+            return window.data.categories.map(function (cat) {
+                return {
+                    "id": cat.id,
+                    "description": {
+                        "de-AT": cat.name
+                    }
+                }
+            });
+        }
+
+        function getTargetSet() {
+            //global items
+            return window.data.globalItems.map(function (item) {
+                return {
+                    "id": item,
+                    "description": {
+                        "de-AT": item
+                    }
+                };
+            });
+        }
+
+        init();
+        setCategories();
+        setGlobalItems();
+
+        updateLayout();
+    </script>
+</body>
+
+</html>
